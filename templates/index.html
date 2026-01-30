@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+* { box-sizing: border-box }
+body {
+  margin: 0;
+  padding: 12px;
+  background: #f2f4f7;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
+}
+
+h3 { margin: 0 0 10px }
+
+.card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.06);
+}
+
+input, select, button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  font-size: 15px;
+}
+
+button {
+  background: #2f80ed;
+  color: #fff;
+  border: none;
+  font-weight: 600;
+}
+
+button.danger {
+  background: #eb5757;
+}
+
+.venda {
+  border-top: 1px solid #eee;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+small {
+  color: #555;
+}
+
+.total {
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.actions a {
+  margin-right: 10px;
+  font-size: 14px;
+}
+
+</style>
+
+<script>
+function toggleDinheiro(){
+  document.getElementById("dinheiro").style.display =
+    document.getElementById("pagamento").value === "dinheiro"
+    ? "block" : "none";
+}
+</script>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="card">
+  <h3>📅 Caixa do dia {{ data }}</h3>
+</div>
+
+<!-- NOVA VENDA -->
+<div class="card">
+  <h3>🛒 Nova Venda</h3>
+  <form method="post" action="/venda">
+    <input name="produto" placeholder="Produto" required>
+    <input name="valor" placeholder="Valor (ex: 35.90)" required>
+
+    <select name="pagamento" id="pagamento" onchange="toggleDinheiro()">
+      <option value="pix">Pix</option>
+      <option value="maquina">Máquina</option>
+      <option value="dinheiro">Dinheiro</option>
+    </select>
+
+    <div id="dinheiro" style="display:none">
+      <input name="nota_dada" placeholder="Nota dada (ex: 50)">
+    </div>
+
+    <button>Salvar Venda</button>
+  </form>
+</div>
+
+<!-- VENDAS -->
+<div class="card">
+  <h3>📋 Vendas do Dia</h3>
+
+  {% for v in vendas %}
+  <div class="venda">
+    <strong>{{ v[1] }}</strong><br>
+    R$ {{ "%.2f"|format(v[2]) }} — {{ v[3] }}<br>
+
+    {% if v[3] == "dinheiro" %}
+      <small>Troco: R$ {{ "%.2f"|format(v[5]) }}</small><br>
+    {% endif %}
+
+    <div class="actions">
+      <a href="/editar/venda/{{ v[0] }}">✏️ Editar</a>
+      <a href="/deletar/venda/{{ v[0] }}" style="color:#eb5757">🗑 Excluir</a>
+    </div>
+  </div>
+  {% else %}
+    <small>Nenhuma venda registrada hoje.</small>
+  {% endfor %}
+</div>
+
+<!-- NOVO GASTO -->
+<div class="card">
+  <h3>💸 Novo Gasto</h3>
+  <form method="post" action="/gasto">
+    <input name="descricao" placeholder="Descrição do gasto" required>
+    <input name="valor" placeholder="Valor (ex: 20.00)" required>
+    <button class="danger">Salvar Gasto</button>
+  </form>
+</div>
+
+<!-- GASTOS -->
+<div class="card">
+  <h3>📉 Gastos do Dia</h3>
+
+  {% for g in gastos %}
+  <div class="venda">
+    {{ g[1] }} — R$ {{ "%.2f"|format(g[2]) }}
+    <div class="actions">
+      <a href="/deletar/gasto/{{ g[0] }}" style="color:#eb5757">🗑 Excluir</a>
+    </div>
+  </div>
+  {% else %}
+    <small>Nenhum gasto registrado hoje.</small>
+  {% endfor %}
+</div>
+
+<!-- FECHAMENTO -->
+<div class="card">
+  <h3>💰 Fechamento do Dia</h3>
+
+  <div class="total">Total: R$ {{ "%.2f"|format(total) }}</div>
+  Pix: R$ {{ "%.2f"|format(pix) }}<br>
+  Máquina: R$ {{ "%.2f"|format(maquina) }}<br>
+  Dinheiro: R$ {{ "%.2f"|format(dinheiro) }}<br>
+  Gastos: R$ {{ "%.2f"|format(total_gastos) }}
+</div>
+
+<!-- PDF -->
+<div class="card">
+  <a href="/pdf">
+    <button>📄 Exportar PDF</button>
+  </a>
+</div>
+
+</body>
+</html>

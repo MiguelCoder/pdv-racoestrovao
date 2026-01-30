@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editar Venda</title>
+
+<style>
+body { background:#f4f6f8; padding:12px; font-family:system-ui }
+.card { background:#fff; padding:14px; border-radius:12px }
+input, select, button {
+  width:100%; padding:12px; margin-top:8px;
+  border-radius:8px; border:1px solid #ddd;
+}
+button { background:#2f80ed; color:#fff; border:none; font-weight:bold }
+</style>
+
+<script>
+function toggleDinheiro(){
+  document.getElementById("dinheiro").style.display =
+    document.getElementById("pagamento").value === "dinheiro"
+    ? "block" : "none";
+}
+</script>
+</head>
+
+<body>
+
+<div class="card">
+<h3>✏️ Editar Venda</h3>
+
+<form method="post" action="/editar/venda/{{ venda[0] }}">
+<input name="produto" value="{{ venda[1] }}" required>
+<input name="valor" value="{{ venda[2] }}" required>
+
+<select name="pagamento" id="pagamento" onchange="toggleDinheiro()">
+  <option value="pix" {% if venda[3]=='pix' %}selected{% endif %}>Pix</option>
+  <option value="maquina" {% if venda[3]=='maquina' %}selected{% endif %}>Máquina</option>
+  <option value="dinheiro" {% if venda[3]=='dinheiro' %}selected{% endif %}>Dinheiro</option>
+</select>
+
+<div id="dinheiro" style="display:{% if venda[3]=='dinheiro' %}block{% else %}none{% endif %}">
+<input name="nota_dada" value="{{ venda[4] }}">
+</div>
+
+<button>Salvar Alteração</button>
+</form>
+</div>
+
+</body>
+</html>
