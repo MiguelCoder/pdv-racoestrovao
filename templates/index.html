@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
+<title>PDV- Trovão Rações</title>
 <style>
 * { box-sizing: border-box }
 body {
@@ -89,8 +89,8 @@ function toggleDinheiro(){
     <input name="valor" placeholder="Valor (ex: 35.90)" required>
 
     <select name="pagamento" id="pagamento" onchange="toggleDinheiro()">
-      <option value="pix">Pix</option>
       <option value="maquina">Máquina</option>
+      <option value="pix">Pix</option>
       <option value="dinheiro">Dinheiro</option>
     </select>
 
