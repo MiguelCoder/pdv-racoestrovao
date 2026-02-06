@@ -77,10 +77,14 @@ def login(username: str = Form(...), password: str = Form(...)):
 
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(
-            "session",
-            serializer.dumps(username),
-            httponly=True
+            key="session",
+            value=serializer.dumps(username),
+            httponly=True,
+            secure=True,  # 🔥 HTTPS
+            samesite="lax",  # 🔥 evita bloqueio
+            max_age=60 * 60 * 8  # 8 horas
         )
+
         return response
 
     except Exception as e:
