@@ -22,13 +22,20 @@ app.add_middleware(
 )
 
 # ---------------- SEGURANÇA ----------------
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-serializer = URLSafeSerializer(os.getenv("SECRET_KEY", "chave-super-secreta"))
+# ⚠️ bcrypt removido → pbkdf2 (compatível com Python 3.12)
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256"],
+    deprecated="auto"
+)
 
-def hash_senha(senha):
+serializer = URLSafeSerializer(
+    os.getenv("SECRET_KEY", "chave-super-secreta")
+)
+
+def hash_senha(senha: str) -> str:
     return pwd_context.hash(senha)
 
-def verificar_senha(senha, senha_hash):
+def verificar_senha(senha: str, senha_hash: str) -> bool:
     return pwd_context.verify(senha, senha_hash)
 
 def usuario_logado(request: Request):
@@ -55,7 +62,10 @@ def login_page(request: Request):
 def login(username: str = Form(...), password: str = Form(...)):
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT password FROM usuarios WHERE username=%s", (username,))
+    c.execute(
+        "SELECT password FROM usuarios WHERE username = %s",
+        (username,)
+    )
     user = c.fetchone()
     conn.close()
 
@@ -63,7 +73,11 @@ def login(username: str = Form(...), password: str = Form(...)):
         return RedirectResponse("/login", status_code=303)
 
     response = RedirectResponse("/", status_code=303)
-    response.set_cookie("session", serializer.dumps(username), httponly=True)
+    response.set_cookie(
+        "session",
+        serializer.dumps(username),
+        httponly=True
+    )
     return response
 
 @app.get("/logout")
@@ -76,7 +90,7 @@ def logout():
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, data: str | None = None):
     if not usuario_logado(request):
-        return RedirectResponse("/login")
+        return RedirectResponse("/login", status_code=303)
 
     data_filtro = data or date.today().isoformat()
 
@@ -125,8 +139,6 @@ def nova_venda(
     pagamento: str = Form(...),
     nota_dada: float = Form(0)
 ):
-    data = datetime.now()
-
     troco = round(nota_dada - valor, 2) if pagamento == "dinheiro" else 0
 
     conn = get_db()
@@ -134,7 +146,7 @@ def nova_venda(
     c.execute("""
         INSERT INTO vendas (produto, valor, pagamento, nota_dada, troco, data)
         VALUES (%s, %s, %s, %s, %s, %s)
-    """, (produto, valor, pagamento, nota_dada, troco, data))
+    """, (produto, valor, pagamento, nota_dada, troco, datetime.now()))
     conn.commit()
     conn.close()
 
@@ -186,6 +198,7 @@ def gerar_pdf(data: str | None = None):
     pdf.drawString(50, y, "FECHAMENTO DE CAIXA - Rações Trovão")
     y -= 30
 
+    pdf.setFont("Helvetica", 11)
     for v in vendas:
         pdf.drawString(50, y, f"{v[0]} | R$ {v[1]:.2f} | {v[2]}")
         y -= 15
