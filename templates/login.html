@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login - PDV</title>
+
+<style>
+body {
+  background: #f2f4f7;
+  font-family: system-ui;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.card {
+  background: #fff;
+  padding: 20px;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 320px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.1);
+}
+
+input, button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+}
+
+button {
+  background: #2f80ed;
+  color: #fff;
+  border: none;
+  font-weight: 600;
+}
+</style>
+</head>
+
+<body>
+  <div class="card">
+    <h3>🔐 Login PDV</h3>
+
+    <form method="post">
+      <input name="username" placeholder="Usuário" required>
+      <input type="password" name="password" placeholder="Senha" required>
+      <button>Entrar</button>
+    </form>
+  </div>
+</body>
+</html>
