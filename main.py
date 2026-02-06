@@ -10,7 +10,14 @@ from reportlab.pdfgen import canvas
 import psycopg2
 import os
 
-# ---------------- APP ----------------
+# ================== CONFIG ==================
+ENV = os.getenv("ENV", "development")
+IS_PROD = ENV == "production"
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+SECRET_KEY = os.getenv("SECRET_KEY", "chave-super-secreta")
+
+# ================== APP ==================
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
@@ -21,18 +28,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- SEGURANÇA ----------------
+# ================== SEGURANÇA ==================
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
     deprecated="auto"
 )
 
-serializer = URLSafeSerializer(
-    os.getenv("SECRET_KEY", "chave-super-secreta")
-)
+serializer = URLSafeSerializer(SECRET_KEY)
+
 
 def verificar_senha(senha: str, senha_hash: str) -> bool:
     return pwd_context.verify(senha, senha_hash)
+
 
 def usuario_logado(request: Request):
     cookie = request.cookies.get("session")
@@ -40,64 +47,63 @@ def usuario_logado(request: Request):
         return None
     try:
         return serializer.loads(cookie)
-    except:
+    except Exception:
         return None
 
-# ---------------- BANCO ----------------
-DATABASE_URL = os.getenv("DATABASE_URL")
 
+# ================== BANCO ==================
 def get_db():
     return psycopg2.connect(
         DATABASE_URL,
         sslmode="require"
     )
 
-# ---------------- LOGIN ----------------
+
+# ================== LOGIN ==================
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
+
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
-    try:
-        conn = get_db()
-        cur = conn.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
-        cur.execute(
-            "SELECT password FROM usuarios WHERE username = %s",
-            (username,)
-        )
-        user = cur.fetchone()
+    cur.execute(
+        "SELECT password FROM usuarios WHERE username = %s",
+        (username,)
+    )
+    user = cur.fetchone()
 
-        cur.close()
-        conn.close()
+    cur.close()
+    conn.close()
 
-        if not user or not verificar_senha(password, user[0]):
-            return RedirectResponse("/login", status_code=303)
-
-        response = RedirectResponse("/", status_code=303)
-        response.set_cookie(
-            key="session",
-            value=serializer.dumps(username),
-            httponly=True,
-            secure=True,  # 🔥 HTTPS
-            samesite="lax",  # 🔥 evita bloqueio
-            max_age=60 * 60 * 8  # 8 horas
-        )
-
-        return response
-
-    except Exception as e:
-        print("ERRO LOGIN:", e)
+    if not user or not verificar_senha(password, user[0]):
         return RedirectResponse("/login", status_code=303)
+
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        key="session",
+        value=serializer.dumps(username),
+        httponly=True,
+        secure=IS_PROD,
+        samesite="lax",
+        max_age=60 * 60 * 8,
+        path="/"
+    )
+
+    return response
+
 
 @app.get("/logout")
 def logout():
     response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie("session")
+    response.delete_cookie("session", path="/")
     return response
 
-# ---------------- HOME ----------------
+
+# ================== HOME ==================
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, data: str | None = None):
     if not usuario_logado(request):
@@ -105,31 +111,25 @@ def index(request: Request, data: str | None = None):
 
     data_filtro = data or date.today().isoformat()
 
-    try:
-        conn = get_db()
-        cur = conn.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
-        cur.execute("""
-            SELECT * FROM vendas
-            WHERE data::date = %s
-            ORDER BY id DESC
-        """, (data_filtro,))
-        vendas = cur.fetchall()
+    cur.execute("""
+        SELECT * FROM vendas
+        WHERE data::date = %s
+        ORDER BY id DESC
+    """, (data_filtro,))
+    vendas = cur.fetchall()
 
-        cur.execute("""
-            SELECT * FROM gastos
-            WHERE data::date = %s
-            ORDER BY id DESC
-        """, (data_filtro,))
-        gastos = cur.fetchall()
+    cur.execute("""
+        SELECT * FROM gastos
+        WHERE data::date = %s
+        ORDER BY id DESC
+    """, (data_filtro,))
+    gastos = cur.fetchall()
 
-        cur.close()
-        conn.close()
-
-    except Exception as e:
-        print("ERRO HOME:", e)
-        vendas = []
-        gastos = []
+    cur.close()
+    conn.close()
 
     total = sum(v[2] for v in vendas)
     pix = sum(v[2] for v in vendas if v[3] == "pix")
@@ -149,7 +149,8 @@ def index(request: Request, data: str | None = None):
         "data": data_filtro
     })
 
-# ---------------- VENDAS ----------------
+
+# ================== VENDAS ==================
 @app.post("/venda")
 def nova_venda(
     produto: str = Form(...),
@@ -159,46 +160,40 @@ def nova_venda(
 ):
     troco = round(nota_dada - valor, 2) if pagamento == "dinheiro" else 0
 
-    try:
-        conn = get_db()
-        cur = conn.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
-        cur.execute("""
-            INSERT INTO vendas (produto, valor, pagamento, nota_dada, troco, data)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (produto, valor, pagamento, nota_dada, troco, datetime.now()))
+    cur.execute("""
+        INSERT INTO vendas (produto, valor, pagamento, nota_dada, troco, data)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (produto, valor, pagamento, nota_dada, troco, datetime.now()))
 
-        conn.commit()
-        cur.close()
-        conn.close()
-
-    except Exception as e:
-        print("ERRO VENDA:", e)
+    conn.commit()
+    cur.close()
+    conn.close()
 
     return RedirectResponse("/", status_code=303)
 
-# ---------------- GASTOS ----------------
+
+# ================== GASTOS ==================
 @app.post("/gasto")
 def novo_gasto(descricao: str = Form(...), valor: float = Form(...)):
-    try:
-        conn = get_db()
-        cur = conn.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
-        cur.execute("""
-            INSERT INTO gastos (descricao, valor, data)
-            VALUES (%s, %s, %s)
-        """, (descricao, valor, datetime.now()))
+    cur.execute("""
+        INSERT INTO gastos (descricao, valor, data)
+        VALUES (%s, %s, %s)
+    """, (descricao, valor, datetime.now()))
 
-        conn.commit()
-        cur.close()
-        conn.close()
-
-    except Exception as e:
-        print("ERRO GASTO:", e)
+    conn.commit()
+    cur.close()
+    conn.close()
 
     return RedirectResponse("/", status_code=303)
 
-# ---------------- PDF ----------------
+
+# ================== PDF ==================
 @app.get("/pdf")
 def gerar_pdf(data: str | None = None):
     data_filtro = data or date.today().isoformat()
