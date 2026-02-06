@@ -22,7 +22,6 @@ app.add_middleware(
 )
 
 # ---------------- SEGURANÇA ----------------
-# ⚠️ bcrypt removido → pbkdf2 (compatível com Python 3.12)
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
     deprecated="auto"
@@ -31,9 +30,6 @@ pwd_context = CryptContext(
 serializer = URLSafeSerializer(
     os.getenv("SECRET_KEY", "chave-super-secreta")
 )
-
-def hash_senha(senha: str) -> str:
-    return pwd_context.hash(senha)
 
 def verificar_senha(senha: str, senha_hash: str) -> bool:
     return pwd_context.verify(senha, senha_hash)
@@ -51,7 +47,10 @@ def usuario_logado(request: Request):
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_db():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(
+        DATABASE_URL,
+        sslmode="require"
+    )
 
 # ---------------- LOGIN ----------------
 @app.get("/login", response_class=HTMLResponse)
@@ -60,25 +59,33 @@ def login_page(request: Request):
 
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute(
-        "SELECT password FROM usuarios WHERE username = %s",
-        (username,)
-    )
-    user = c.fetchone()
-    conn.close()
+    try:
+        conn = get_db()
+        cur = conn.cursor()
 
-    if not user or not verificar_senha(password, user[0]):
+        cur.execute(
+            "SELECT password FROM usuarios WHERE username = %s",
+            (username,)
+        )
+        user = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if not user or not verificar_senha(password, user[0]):
+            return RedirectResponse("/login", status_code=303)
+
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            "session",
+            serializer.dumps(username),
+            httponly=True
+        )
+        return response
+
+    except Exception as e:
+        print("ERRO LOGIN:", e)
         return RedirectResponse("/login", status_code=303)
-
-    response = RedirectResponse("/", status_code=303)
-    response.set_cookie(
-        "session",
-        serializer.dumps(username),
-        httponly=True
-    )
-    return response
 
 @app.get("/logout")
 def logout():
@@ -94,24 +101,31 @@ def index(request: Request, data: str | None = None):
 
     data_filtro = data or date.today().isoformat()
 
-    conn = get_db()
-    c = conn.cursor()
+    try:
+        conn = get_db()
+        cur = conn.cursor()
 
-    c.execute("""
-        SELECT * FROM vendas
-        WHERE data::date = %s
-        ORDER BY id DESC
-    """, (data_filtro,))
-    vendas = c.fetchall()
+        cur.execute("""
+            SELECT * FROM vendas
+            WHERE data::date = %s
+            ORDER BY id DESC
+        """, (data_filtro,))
+        vendas = cur.fetchall()
 
-    c.execute("""
-        SELECT * FROM gastos
-        WHERE data::date = %s
-        ORDER BY id DESC
-    """, (data_filtro,))
-    gastos = c.fetchall()
+        cur.execute("""
+            SELECT * FROM gastos
+            WHERE data::date = %s
+            ORDER BY id DESC
+        """, (data_filtro,))
+        gastos = cur.fetchall()
 
-    conn.close()
+        cur.close()
+        conn.close()
+
+    except Exception as e:
+        print("ERRO HOME:", e)
+        vendas = []
+        gastos = []
 
     total = sum(v[2] for v in vendas)
     pix = sum(v[2] for v in vendas if v[3] == "pix")
@@ -141,28 +155,42 @@ def nova_venda(
 ):
     troco = round(nota_dada - valor, 2) if pagamento == "dinheiro" else 0
 
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO vendas (produto, valor, pagamento, nota_dada, troco, data)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (produto, valor, pagamento, nota_dada, troco, datetime.now()))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO vendas (produto, valor, pagamento, nota_dada, troco, data)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (produto, valor, pagamento, nota_dada, troco, datetime.now()))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    except Exception as e:
+        print("ERRO VENDA:", e)
 
     return RedirectResponse("/", status_code=303)
 
 # ---------------- GASTOS ----------------
 @app.post("/gasto")
 def novo_gasto(descricao: str = Form(...), valor: float = Form(...)):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO gastos (descricao, valor, data)
-        VALUES (%s, %s, %s)
-    """, (descricao, valor, datetime.now()))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO gastos (descricao, valor, data)
+            VALUES (%s, %s, %s)
+        """, (descricao, valor, datetime.now()))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    except Exception as e:
+        print("ERRO GASTO:", e)
 
     return RedirectResponse("/", status_code=303)
 
@@ -173,22 +201,23 @@ def gerar_pdf(data: str | None = None):
     arquivo = f"fechamento_{data_filtro}.pdf"
 
     conn = get_db()
-    c = conn.cursor()
+    cur = conn.cursor()
 
-    c.execute("""
+    cur.execute("""
         SELECT produto, valor, pagamento, troco
         FROM vendas
         WHERE data::date = %s
     """, (data_filtro,))
-    vendas = c.fetchall()
+    vendas = cur.fetchall()
 
-    c.execute("""
+    cur.execute("""
         SELECT descricao, valor
         FROM gastos
         WHERE data::date = %s
     """, (data_filtro,))
-    gastos = c.fetchall()
+    gastos = cur.fetchall()
 
+    cur.close()
     conn.close()
 
     pdf = canvas.Canvas(arquivo, pagesize=A4)
