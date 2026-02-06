@@ -1,5 +1,12 @@
 fastapi
-uvicorn
-jinja2
+uvicorn[standard]
+
+psycopg2-binary
+
 python-multipart
+passlib[bcrypt]
+itsdangerous
+
+jinja2
+
 reportlab
