@@ -10,14 +10,23 @@ from reportlab.pdfgen import canvas
 import psycopg2
 import os
 
-# ================== CONFIG ==================
+# ======================================================
+# CONFIGURAÇÕES DE AMBIENTE
+# ======================================================
 ENV = os.getenv("ENV", "development")
 IS_PROD = ENV == "production"
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-SECRET_KEY = os.getenv("SECRET_KEY", "chave-super-secreta")
+DATABASE_URL = os.getenv("postgresql://postgres:IFhlMrHSEravHSmCkgBVEaIDmKozdZIU@Postgres.railway.internal:5432/railway")
+if not DATABASE_URL:
+    raise RuntimeError("❌ DATABASE_URL não definida")
 
-# ================== APP ==================
+SECRET_KEY = os.getenv("R4c0esTrov4o_2026_SUPER_SECRET_!@")
+if not SECRET_KEY:
+    raise RuntimeError("❌ SECRET_KEY não definida")
+
+# ======================================================
+# APP
+# ======================================================
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
@@ -28,7 +37,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ================== SEGURANÇA ==================
+# ======================================================
+# SEGURANÇA
+# ======================================================
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
     deprecated="auto"
@@ -51,7 +62,9 @@ def usuario_logado(request: Request):
         return None
 
 
-# ================== BANCO ==================
+# ======================================================
+# BANCO DE DADOS
+# ======================================================
 def get_db():
     return psycopg2.connect(
         DATABASE_URL,
@@ -59,7 +72,9 @@ def get_db():
     )
 
 
-# ================== LOGIN ==================
+# ======================================================
+# LOGIN
+# ======================================================
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
@@ -83,14 +98,15 @@ def login(username: str = Form(...), password: str = Form(...)):
         return RedirectResponse("/login", status_code=303)
 
     response = RedirectResponse("/", status_code=303)
+
     response.set_cookie(
         key="session",
         value=serializer.dumps(username),
         httponly=True,
-        secure=IS_PROD,
+        secure=IS_PROD,        # 🔐 true em produção
         samesite="lax",
-        max_age=60 * 60 * 8,
-        path="/"
+        path="/",
+        max_age=60 * 60 * 8    # 8 horas
     )
 
     return response
@@ -103,7 +119,9 @@ def logout():
     return response
 
 
-# ================== HOME ==================
+# ======================================================
+# HOME
+# ======================================================
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, data: str | None = None):
     if not usuario_logado(request):
@@ -150,7 +168,9 @@ def index(request: Request, data: str | None = None):
     })
 
 
-# ================== VENDAS ==================
+# ======================================================
+# VENDAS
+# ======================================================
 @app.post("/venda")
 def nova_venda(
     produto: str = Form(...),
@@ -175,7 +195,9 @@ def nova_venda(
     return RedirectResponse("/", status_code=303)
 
 
-# ================== GASTOS ==================
+# ======================================================
+# GASTOS
+# ======================================================
 @app.post("/gasto")
 def novo_gasto(descricao: str = Form(...), valor: float = Form(...)):
     conn = get_db()
@@ -193,7 +215,9 @@ def novo_gasto(descricao: str = Form(...), valor: float = Form(...)):
     return RedirectResponse("/", status_code=303)
 
 
-# ================== PDF ==================
+# ======================================================
+# PDF
+# ======================================================
 @app.get("/pdf")
 def gerar_pdf(data: str | None = None):
     data_filtro = data or date.today().isoformat()
