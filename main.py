@@ -1,79 +1,101 @@
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
-import sqlite3
-from datetime import datetime
+from fastapi.middleware.cors import CORSMiddleware
+from passlib.context import CryptContext
+from itsdangerous import URLSafeSerializer
+from datetime import datetime, date
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+import psycopg2
+import os
 
+# ---------------- APP ----------------
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
-DB = "caixa.db"
-from fastapi.middleware.cors import CORSMiddleware
 
-@app.middleware("http")
-async def ngrok_skip_browser_warning(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["ngrok-skip-browser-warning"] = "true"
-    return response
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+# ---------------- SEGURANÇA ----------------
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+serializer = URLSafeSerializer(os.getenv("SECRET_KEY", "chave-super-secreta"))
 
-# ---------- BANCO ----------
+def hash_senha(senha):
+    return pwd_context.hash(senha)
+
+def verificar_senha(senha, senha_hash):
+    return pwd_context.verify(senha, senha_hash)
+
+def usuario_logado(request: Request):
+    cookie = request.cookies.get("session")
+    if not cookie:
+        return None
+    try:
+        return serializer.loads(cookie)
+    except:
+        return None
+
+# ---------------- BANCO ----------------
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 def get_db():
-    return sqlite3.connect(DB)
+    return psycopg2.connect(DATABASE_URL)
 
+# ---------------- LOGIN ----------------
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
-def init_db():
+@app.post("/login")
+def login(username: str = Form(...), password: str = Form(...)):
     conn = get_db()
     c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS vendas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            produto TEXT,
-            valor REAL,
-            pagamento TEXT,
-            nota_dada REAL,
-            troco REAL,
-            data TEXT
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS gastos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            descricao TEXT,
-            valor REAL,
-            data TEXT
-        )
-    """)
-
-    conn.commit()
+    c.execute("SELECT password FROM usuarios WHERE username=%s", (username,))
+    user = c.fetchone()
     conn.close()
 
+    if not user or not verificar_senha(password, user[0]):
+        return RedirectResponse("/login", status_code=303)
 
-init_db()
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie("session", serializer.dumps(username), httponly=True)
+    return response
 
+@app.get("/logout")
+def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie("session")
+    return response
 
-# ---------- HOME ----------
+# ---------------- HOME ----------------
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    hoje = datetime.now().strftime("%d/%m/%Y")
+def index(request: Request, data: str | None = None):
+    if not usuario_logado(request):
+        return RedirectResponse("/login")
+
+    data_filtro = data or date.today().isoformat()
 
     conn = get_db()
     c = conn.cursor()
 
-    vendas = c.execute("""
+    c.execute("""
         SELECT * FROM vendas
-        WHERE data LIKE ?
+        WHERE data::date = %s
         ORDER BY id DESC
-    """, (f"{hoje}%",)).fetchall()
+    """, (data_filtro,))
+    vendas = c.fetchall()
 
-    gastos = c.execute("""
+    c.execute("""
         SELECT * FROM gastos
-        WHERE data LIKE ?
+        WHERE data::date = %s
         ORDER BY id DESC
-    """, (f"{hoje}%",)).fetchall()
+    """, (data_filtro,))
+    gastos = c.fetchall()
 
     conn.close()
 
@@ -92,11 +114,10 @@ def index(request: Request):
         "maquina": maquina,
         "dinheiro": dinheiro,
         "total_gastos": total_gastos,
-        "data": hoje
+        "data": data_filtro
     })
 
-
-# ---------- NOVA VENDA ----------
+# ---------------- VENDAS ----------------
 @app.post("/venda")
 def nova_venda(
     produto: str = Form(...),
@@ -104,178 +125,75 @@ def nova_venda(
     pagamento: str = Form(...),
     nota_dada: float = Form(0)
 ):
-    troco = 0
-    if pagamento == "dinheiro":
-        troco = round(nota_dada - valor, 2)
+    data = datetime.now()
 
-    data = datetime.now().strftime("%d/%m/%Y %H:%M")
+    troco = round(nota_dada - valor, 2) if pagamento == "dinheiro" else 0
 
     conn = get_db()
     c = conn.cursor()
     c.execute("""
         INSERT INTO vendas (produto, valor, pagamento, nota_dada, troco, data)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """, (produto, valor, pagamento, nota_dada, troco, data))
-
     conn.commit()
     conn.close()
 
     return RedirectResponse("/", status_code=303)
 
-
-# ---------- NOVO GASTO ----------
+# ---------------- GASTOS ----------------
 @app.post("/gasto")
-def novo_gasto(
-    descricao: str = Form(...),
-    valor: float = Form(...)
-):
-    data = datetime.now().strftime("%d/%m/%Y %H:%M")
-
+def novo_gasto(descricao: str = Form(...), valor: float = Form(...)):
     conn = get_db()
     c = conn.cursor()
     c.execute("""
         INSERT INTO gastos (descricao, valor, data)
-        VALUES (?, ?, ?)
-    """, (descricao, valor, data))
-
+        VALUES (%s, %s, %s)
+    """, (descricao, valor, datetime.now()))
     conn.commit()
     conn.close()
 
     return RedirectResponse("/", status_code=303)
 
-
-# ---------- DELETAR ----------
-@app.get("/deletar/venda/{id}")
-def deletar_venda(id: int):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM vendas WHERE id = ?", (id,))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/", status_code=303)
-
-
-@app.get("/deletar/gasto/{id}")
-def deletar_gasto(id: int):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM gastos WHERE id = ?", (id,))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/", status_code=303)
-
-
-# ---------- EDITAR ----------
-@app.get("/editar/venda/{id}", response_class=HTMLResponse)
-def editar_venda(request: Request, id: int):
-    conn = get_db()
-    c = conn.cursor()
-    venda = c.execute(
-        "SELECT * FROM vendas WHERE id = ?",
-        (id,)
-    ).fetchone()
-    conn.close()
-
-    return templates.TemplateResponse("editar.html", {
-        "request": request,
-        "venda": venda
-    })
-
-
-@app.post("/editar/venda/{id}")
-def salvar_edicao(
-    id: int,
-    produto: str = Form(...),
-    valor: float = Form(...),
-    pagamento: str = Form(...),
-    nota_dada: float = Form(0)
-):
-    troco = 0
-    if pagamento == "dinheiro":
-        troco = round(nota_dada - valor, 2)
-
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        UPDATE vendas
-        SET produto=?, valor=?, pagamento=?, nota_dada=?, troco=?
-        WHERE id=?
-    """, (produto, valor, pagamento, nota_dada, troco, id))
-
-    conn.commit()
-    conn.close()
-
-    return RedirectResponse("/", status_code=303)
-
-
-# ---------- PDF ----------
+# ---------------- PDF ----------------
 @app.get("/pdf")
-def gerar_pdf():
-    hoje = datetime.now().strftime("%d/%m/%Y")
-    arquivo = f"fechamento_{hoje.replace('/', '-')}.pdf"
+def gerar_pdf(data: str | None = None):
+    data_filtro = data or date.today().isoformat()
+    arquivo = f"fechamento_{data_filtro}.pdf"
 
     conn = get_db()
     c = conn.cursor()
 
-    vendas = c.execute("""
+    c.execute("""
         SELECT produto, valor, pagamento, troco
         FROM vendas
-        WHERE data LIKE ?
-    """, (f"{hoje}%",)).fetchall()
+        WHERE data::date = %s
+    """, (data_filtro,))
+    vendas = c.fetchall()
 
-    gastos = c.execute("""
+    c.execute("""
         SELECT descricao, valor
         FROM gastos
-        WHERE data LIKE ?
-    """, (f"{hoje}%",)).fetchall()
+        WHERE data::date = %s
+    """, (data_filtro,))
+    gastos = c.fetchall()
 
     conn.close()
-
-    total = sum(v[1] for v in vendas)
-    pix = sum(v[1] for v in vendas if v[2] == "pix")
-    maquina = sum(v[1] for v in vendas if v[2] == "maquina")
-    dinheiro = sum(v[1] for v in vendas if v[2] == "dinheiro")
-    total_gastos = sum(g[1] for g in gastos)
 
     pdf = canvas.Canvas(arquivo, pagesize=A4)
     y = 800
 
     pdf.setFont("Helvetica-Bold", 14)
     pdf.drawString(50, y, "FECHAMENTO DE CAIXA - Rações Trovão")
-    y -= 25
-
-    pdf.setFont("Helvetica", 11)
-    pdf.drawString(50, y, f"Data: {hoje}")
     y -= 30
 
     for v in vendas:
-        pdf.drawString(
-            50, y,
-            f"{v[0]} | R$ {v[1]:.2f} | {v[2]} | Troco: R$ {v[3]:.2f}"
-        )
+        pdf.drawString(50, y, f"{v[0]} | R$ {v[1]:.2f} | {v[2]}")
         y -= 15
 
     y -= 20
-
-    y -= 15
-
-    pdf.setFont("Helvetica", 11)
     for g in gastos:
         pdf.drawString(50, y, f"{g[0]} - R$ {g[1]:.2f}")
         y -= 14
 
-    y -= 20
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(50, y, f"TOTAL: R$ {total:.2f}")
-    y -= 14
-    pdf.drawString(50, y, f"PIX: R$ {pix:.2f}")
-    y -= 14
-    pdf.drawString(50, y, f"MÁQUINA: R$ {maquina:.2f}")
-    y -= 14
-    pdf.drawString(50, y, f"DINHEIRO: R$ {dinheiro:.2f}")
-    y -= 14
-    pdf.drawString(50, y, f"GASTOS: R$ {total_gastos:.2f}")
-
     pdf.save()
-
     return FileResponse(arquivo, filename=arquivo)
